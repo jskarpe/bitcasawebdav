@@ -1,0 +1,28 @@
+{
+    "name": "yuav/bitcasawebdav",
+    "description": "Bitcasa Webdav implementation in PHP",
+    "keywords": ["bitcasa", "cloud", "storage", "webdav"],
+    "homepage": "http://github.com/Yuav/bitcasawebdav",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Jon Skarpeteig",
+            "email": "lesspublic@gmail.com"
+        }
+    ],
+    "require": {
+        "php": ">=5.3.0",
+        "ext-curl": "*",
+        "sabre/dav" : "1.8.*",
+        "doctrine/dbal": "2.5.*@dev",
+        "doctrine/orm": "2.5.*@dev",
+        "lusitanian/oauth": "~0.2"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "3.7.*"
+    },
+    "autoload": {
+        "psr-0": {"BitcasaWebdav": "src/"}
+    }
+}
