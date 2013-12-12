@@ -52,10 +52,24 @@ class Directory extends Node implements DAV\ICollection, DAV\IQuota
 	 */
 	public function createFile($name, $data = null)
 	{
-
-		$newPath = $this->path . '/' . $name;
-		file_put_contents($newPath, $data);
-
+		$path = $this->getPath();
+		$path = ('/' == $path) ? '' : $path;
+		$newPath = $path . '/' . $name;
+		$file = new \BitcasaWebdav\FS\File($newPath);
+		$file->setClient($this->getClient());
+		$file->setEntityManager($this->getEntityManager());
+		$file->setName($name);
+		$this->addChild($file);
+		$file->put($data);
+		
+		
+	
+// 		file_put_contents($this->getRealPath(), $data);
+// 		$this->setChildrenFetched(false);
+		$em = $this->getEntityManager();
+		$em->persist($this);
+		$em->flush();
+// 		$file = new \BitcasaWebdav\FS\File($newPath);
 	}
 
 	/**

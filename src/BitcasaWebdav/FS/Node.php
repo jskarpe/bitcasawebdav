@@ -213,6 +213,9 @@ abstract class Node implements DAV\INode
 		$this->mirrored = $mirrored;
 	}
 
+	/**
+	 * @return \BitcasaWebdav\FS\Directory
+	 */
 	public function getParent()
 	{
 		return $this->parent;
