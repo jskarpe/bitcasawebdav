@@ -1,5 +1,6 @@
 <?php
 namespace BitcasaWebdav;
+use \Monolog\Logger;
 class Client
 {
 
@@ -9,6 +10,7 @@ class Client
 	private $accessToken;
 	private $tempFiles;
 	private $tempDirs;
+	private $logger;
 
 	public function __construct($accessToken, $apiUrl = 'https://developer.api.bitcasa.com/v1')
 	{
@@ -173,41 +175,68 @@ class Client
 		$this->tempDirs[] = $tmpDir;
 		file_put_contents($tmpFile, $data);
 
+		if (0 == filesize($tmpFile)) {
+			/**
+			 * Windows seems to perform the following actions when doing a PUT request:
+			 * - Create an empty file using PUT
+			 * - Lock the newly created file
+			 * - PUT on the same file again with the actual file body
+			 * - A PROPPATCH request
+			 */
+			if ($log = $this->getLogger()) {
+				$log
+						->debug('0 byte file received. Storing it in cache only, no request to Bitcasa sent',
+								array('upload'));
+			}
+			unlink($tmpFile);
+			rmdir($tmpDir);
+			return array('size' => 0);
+		}
+
 		$options[CURLOPT_POST] = true;
 		$options[CURLOPT_RETURNTRANSFER] = true;
-		// 			$options[CURLOPT_CUSTOMREQUEST] = "PUT";
-		// 			$options[CURLOPT_HTTPHEADER] = array('X-HTTP-Method-Override: PUT');
-
-		$post = array('file' => "@$tmpFile", 'filename' => $filename);
+		$exist = 'overwrite';
+		$post = array('file' => "@$tmpFile", 'filename' => $filename, 'exists' => $exist);
 		$options[CURLOPT_POSTFIELDS] = $post;
-		// 			curl_setopt($ch, CURLOPT_POSTFIELDS,http_build_query($data));
-		// 			CURLOPT_PUT 	TRUE to HTTP PUT a file. The file to PUT must be set with CURLOPT_INFILE and CURLOPT_INFILESIZE.
-		// 		} else {
-		// 			// String upload
-		// 			$options[CURLOPT_POST] = true;
-		// 			$post = array('file' => $data);
-		// 		}
 
 		$ch = curl_init();
 		curl_setopt_array($ch, $options);
+		if ($log = $this->getLogger()) {
+			$log->debug("Uploading $filename to $fullPath with exist=$exist", array('upload'));
+		}
 		$response = curl_exec($ch);
+		$code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		$error = curl_error($ch);
 		curl_close($ch);
 		unlink($tmpFile);
 		rmdir($tmpDir);
 
+		switch ($code) {
+			case 502:
+				if ($log = $this->getLogger()) {
+					$log->warn('Bitcasa return 502 Bad Gateway. Retrying upload to ' . $fullPath, array('upload'));
+				}
+				return $this->uploadFile($filename, $path, $data); // Bad gateway (Bitcasa internal timeout)
+		}
+
 		$result = json_decode($response, true);
 		if (null === $result) {
 			throw new \Sabre\DAV\Exception(
-					
 					// Windows WebDav ends up here on upload. Why? Rename? 
-			// FIXME - introduce Monolog to log events such as these for easier debugging!
-					
-					
+					// FIXME - introduce Monolog to log events such as these for easier debugging!
+					// Assuming it's gateway timeout this time around
+
 					__METHOD__ . ' GET: ' . $fullPath . ' produced invalid JSON response from server: '
 							. var_export($response, true));
 		}
 
 		if (isset($result['error'])) {
+			if ($log = $this->getLogger()) {
+				$log
+						->error(
+								'Got error from Bitcasa during upload: ' . $result['error']['message']
+										. " on url: $fullPath", array('upload'));
+			}
 			throw new \Sabre\DAV\Exception(__METHOD__ . " Got error from Bitcasa: " . $result['error']['message'],
 					$result['error']['code']);
 		}
@@ -265,35 +294,35 @@ class Client
 
 		if ($code >= 400) {
 			switch ($code) {
-				case 404:
 				case 400:
-					throw new Exception\BadRequest('Bad request');
+					throw new \Sabre\DAV\Exception\Exception\BadRequest('Bad request');
 				case 401:
-					throw new Exception\NotAuthenticated('Not authenticated');
+					throw new \Sabre\DAV\Exception\Exception\NotAuthenticated('Not authenticated');
 				case 402:
-					throw new Exception\PaymentRequired('Payment required');
+					throw new \Sabre\DAV\Exception\Exception\PaymentRequired('Payment required');
 				case 403:
-					throw new Exception\Forbidden('Forbidden');
+					throw new \Sabre\DAV\Exception\Exception\Forbidden('Forbidden');
 				case 404:
-					throw new Exception\NotFound('Resource not found.');
+					throw new \Sabre\DAV\Exception\Exception\NotFound('Resource not found.');
 				case 405:
-					throw new Exception\MethodNotAllowed('Method not allowed');
+					throw new \Sabre\DAV\Exception\Exception\MethodNotAllowed('Method not allowed');
 				case 409:
-					throw new Exception\Conflict('Conflict');
+					throw new \Sabre\DAV\Exception\Exception\Conflict('Conflict');
 				case 412:
-					throw new Exception\PreconditionFailed('Precondition failed');
+					throw new \Sabre\DAV\Exception\Exception\PreconditionFailed('Precondition failed');
 				case 416:
-					throw new Exception\RequestedRangeNotSatisfiable('Requested Range Not Satisfiable');
+					throw new \Sabre\DAV\Exception\Exception\RequestedRangeNotSatisfiable(
+							'Requested Range Not Satisfiable');
 				case 500:
-					throw new Exception('Internal server error');
+					throw new \Sabre\DAV\Exception\Exception('Internal server error');
 				case 501:
-					throw new Exception\NotImplemented('Not Implemented');
+					throw new \Sabre\DAV\Exception\Exception\NotImplemented('Not Implemented');
 				case 502:
 					return $this->get(); // Bad gateway (Bitcasa internal timeout)
 				case 507:
-					throw new Exception\InsufficientStorage('Insufficient storage');
+					throw new \Sabre\DAV\Exception\Exception\InsufficientStorage('Insufficient storage');
 				default:
-					throw new Exception('HTTP error response. (errorcode ' . $code . ')');
+					throw new \Sabre\DAV\Exception\Exception('HTTP error response. (errorcode ' . $code . ')');
 			}
 		}
 
@@ -311,11 +340,18 @@ class Client
 		curl_setopt($ch, CURLOPT_URL, $url);
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
 		curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $timeout);
+		if ($log = $this->getLogger()) {
+			$log->debug("GET $url");
+		}
 		$data = curl_exec($ch);
 		$info = curl_getinfo($ch);
 		if (false === $data) {
 			$error = curl_error($ch);
 			$errno = curl_errno($ch);
+			if ($log = $this->getLogger()) {
+				$log->error("GET $url failed: $error");
+			}
+			throw new \Sabre\DAV\Exception(__METHOD__ . " $error");
 		}
 
 		curl_close($ch);
@@ -329,12 +365,18 @@ class Client
 		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');
 		curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+		if ($log = $this->getLogger()) {
+			$log->debug("DELETE $url");
+		}
 		$response = curl_exec($ch);
 		$info = curl_getinfo($ch);
 		if (false === $data) {
 			$error = curl_error($ch);
 			$errno = curl_errno($ch);
-			throw new \Sabre\DAV\Exception(__METHOD__ . "$error");
+			if ($log = $this->getLogger()) {
+				$log->error("DELETE $url failed: $error");
+			}
+			throw new \Sabre\DAV\Exception(__METHOD__ . " $error");
 		}
 		curl_close($ch);
 		return $response;
@@ -367,6 +409,9 @@ class Client
 		curl_setopt($ch, CURLOPT_POST, true);
 		curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+		if ($log = $this->getLogger()) {
+			$log->debug("PUT $url");
+		}
 		$response = curl_exec($ch);
 
 		$info = curl_getinfo($ch);
@@ -378,6 +423,20 @@ class Client
 
 		curl_close($ch);
 		return $response;
+	}
+
+	/**
+	 * @return \Monolog\Logger
+	 */
+	public function getLogger()
+	{
+		if (null === $this->logger) {
+			if (class_exists('\Monolog\Logger')) {
+				$this->logger = new Logger('BitcasaWebdav');
+				$this->logger->pushHandler(new \Monolog\Handler\StreamHandler('/tmp/bitcasawebdav.log', Logger::DEBUG));
+			}
+		}
+		return $this->logger;
 	}
 }
 
