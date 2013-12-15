@@ -28,9 +28,11 @@ $rootNode = new \BitcasaWebdav\FS\Directory('/');
 $rootNode->setEntityManager($entityManager);
 $rootNode->setName('/');
 $rootNode->setRealPath('/');
+$tree = new \BitcasaWebdav\DAV\ObjectTree($rootNode);
+
 
 // The rootnode needs in turn to be passed to the server class
-$server = new \Sabre\DAV\Server($rootNode);
+$server = new \Sabre\DAV\Server($tree);
 
 // Inject entity manager
 $emPlugin = new \BitcasaWebdav\FS\Plugin\EntityManager();

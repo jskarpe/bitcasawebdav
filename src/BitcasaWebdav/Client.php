@@ -274,6 +274,44 @@ class Client
 		return $result;
 	}
 
+	public function renameFile($realPath, $newName, $exists = 'fail')
+	{
+		$params = array("from" => $realPath, "filename" => $newName, "exists" => $exists);
+		$url = "https://developer.api.bitcasa.com/v1/files?operation=rename&access_token=$this->accessToken";
+		$response = $this->post($url, $params);
+		return $this->decodeAndVerifyResponse($response);
+	}
+
+	public function moveFile($fromPath, $toPath, $filename = null, $exists = 'fail')
+	{
+		$params = array("from" => $fromPath, "to" => $toPath, "exists" => $exists);
+		if (!empty($filename)) {
+			$params['filename'] = $filename;
+		}
+		$url = "https://developer.api.bitcasa.com/v1/files?operation=move&access_token=$this->accessToken";
+		$response = $this->post($url, $params);
+		return $this->decodeAndVerifyResponse($response);
+	}
+
+	public function renameDirectory($realPath, $newName, $exists = 'fail')
+	{
+		$params = array("from" => $realPath, "filename" => $newName, "exists" => $exists);
+		$url = "https://developer.api.bitcasa.com/v1/folders?operation=rename&access_token=$this->accessToken";
+		$response = $this->post($url, $params);
+		return $this->decodeAndVerifyResponse($response);
+	}
+
+	public function moveDirectory($fromPath, $toPath, $filename = null, $exists = 'fail')
+	{
+		$params = array("from" => $fromPath, "to" => $toPath, "exists" => $exists);
+		if (!empty($filename)) {
+			$params['filename'] = $filename;
+		}
+		$url = "https://developer.api.bitcasa.com/v1/folders?operation=move&access_token=$this->accessToken";
+		$response = $this->post($url, $params);
+		return $this->decodeAndVerifyResponse($response);
+	}
+
 	public function downloadFile($filename, $path)
 	{
 		$url = "https://files.api.bitcasa.com/v1/files/$filename?access_token=$this->accessToken&path=$path";
@@ -423,6 +461,31 @@ class Client
 
 		curl_close($ch);
 		return $response;
+	}
+
+	protected function decodeAndVerifyResponse($httpResponse)
+	{
+		if ($log = $this->getLogger()) {
+			$log->debug('HTTP response: '.$httpResponse);
+		}
+		$result = json_decode($httpResponse, true);
+		if (null === $result) {
+			if ($log = $this->getLogger()) {
+				$log->error('Invalid JSON response from server: ' . var_export($httpResponse, true));
+			}
+			throw new \Sabre\DAV\Exception(
+					__METHOD__ . ' Invalid JSON response from server: ' . var_export($httpResponse, true));
+		}
+
+		if (isset($result['error'])) {
+			if ($log = $this->getLogger()) {
+				$log->error(" Got error {$result['error']['code']} from Bitcasa: " . $result['error']['message']);
+			}
+			throw new \Sabre\DAV\Exception(__METHOD__ . " Got error from Bitcasa: " . $result['error']['message'],
+					$result['error']['code']);
+		}
+
+		return $result;
 	}
 
 	/**
