@@ -1,10 +1,18 @@
 BitcasaWebdav wrapper
 =====================
 
-**Tested with Bitcasa Infinity Drive only!**
+Access Bitcasa using WebDAV. 
 
 Installation:
 -------------
+
+Install php + nginx:
+
+    sudo apt-get install php5 php5-curl php5-json php5-fpm php5-sqlite nginx -y
+    # Change listen directive in /etc/php5/fpm/php5-fpm.ini
+    echo "listen 127.0.0.1:9001" >> /etc/php5/fpm/php-fpm.conf
+
+Get WebDAV wrapper:
 
 	git clone https://github.com/Yuav/bitcasawebdav
 	cd bitcasawebdav
@@ -13,61 +21,44 @@ Installation:
 	curl -sS https://getcomposer.org/installer | php
 	mv composer.phar /usr/local/bin/composer
 	composer install
-	
-Set up Apache2 virtualhost:
 
-Edit config/bitcasa.php with client ID and secret
+Set up nginx vhost:
+
+    server {
+        listen 80;
+        root  /var/www/bitcasawebdav/public;
+        access_log  /var/log/nginx/bitcasa.access.log;
+        error_log  /var/log/nginx/bitcasa.error.log;
+
+		client_max_body_size 100G;
+		client_body_timeout 3600;
+
+        index   index.php;
+        location / {
+            dav_methods PUT DELETE MKCOL COPY MOVE;
+            dav_ext_methods PROPFIND OPTIONS;
+            if (!-f $request_filename) {
+              rewrite ^(.*)$ /index.php last;
+            }
+        }
+
+        location ~ \.php$ {
+          fastcgi_pass   127.0.0.1:9001;
+          fastcgi_param  SCRIPT_FILENAME $document_root/index.php;
+          fastcgi_param   APPLICATION_ENV  development;
+          fastcgi_read_timeout 180;
+          include        fastcgi_params;
+        }
+    }
 
 Browse to localhost/auth.php to retrieve access token.
 
 Browse to localhost/index.php to verify your WebDAV server is working
 
+Bitcasa WebDAV is now ready to be mounted in both Windows and Linux as a network drive
 
-Directories
-------------
-
-What works:
-
-* List folders and files
-* Enter subdirs for listing
-* Persistent cache of tree
-* Create new folders
-* Delete folders (including contents)
-* Transparent cache updates
-
-Not implemented:
-
-* Rename/move folder
-* Copy folder
-* Support for depth parameter
-
-Known issues:
-
-* Cache never expires
-* Windows -> new folder doesn't work due to lack of rename support
-
-Files:
-------
-
-What works:
-
-* File download
-
-Not implemented:
-
-* File upload
-* File rename/move
-* File copy
-* Transparent read cache for files
-
-TODO:
-
-* Error handling doesn't exist
-* Retry on gateway timeout (BS varnish timeout, it's just to retry)
-* Extract Doctrine 2 cache stuff into a plugin
-* Implement background multi-thread workers doing refresh of cache (Gearman?)
- - Something like weighted LRU queue of refresh + min and max lifetime of cache objects
- 	E.G - min 5 minute cache -> /Bitcasa Infinite Drive accessed the most times since last retrieval, 
- 	and more than 5 minutes - move to top of queue.
-* Simplify setup!
-* Get production credentials for app, and hardcode into project
+** Known issues:
+ - Bitcasa API is very slow!
+ - Limited amount of requests against Bitcasa (not approved for production atm.)
+ - Cache never expires (changes done outside of WebDAV are not registered)
+ - Files are not cached (thus experienced to be slow to access and upload)

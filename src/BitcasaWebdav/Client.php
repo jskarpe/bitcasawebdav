@@ -100,18 +100,6 @@ class Client
 		}
 
 		return $result;
-
-		// 		Error Codes:
-
-		// 		2002
-		// 		2003
-		// 		2008
-		// 		2022
-		// 		2023
-		// 		2024
-		// 		2025
-		// 		2026
-
 	}
 
 	public function listFolder($path = '/', $depth = 0)
@@ -120,8 +108,10 @@ class Client
 
 		$url = "https://developer.api.bitcasa.com/v1/folders/$path?access_token=$this->accessToken";
 
+		if ($log = $this->getLogger()) {
+			$log->debug("Listing folder $path from Bitcasa");
+		}
 		$data = $this->get($url);
-		// 		var_dump($url, $data);
 
 		$result = json_decode($data, true);
 		if (null === $result) {
@@ -327,6 +317,10 @@ class Client
 	{
 		$url = "https://files.api.bitcasa.com/v1/files/$filename?access_token=$this->accessToken&path=$path";
 
+		if ($log = $this->getLogger()) {
+			$log->debug("Downloading file $filename from Bitcasa");
+		}
+		
 		$file = tempnam(sys_get_temp_dir(), 'BitcasaWebdav');
 		$this->tempFiles[] = $file;
 
