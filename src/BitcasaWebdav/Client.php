@@ -44,7 +44,7 @@ class Client
 		$result = json_decode($response, true);
 		if (null === $result) {
 			throw new Exception(
-					__METHOD__ . ' GET: ' . $url . ' produced invalid JSON response from server: '
+					__METHOD__ . ' POST: ' . $url . ' produced invalid JSON response from server: '
 							. var_export($result, true));
 		}
 
@@ -141,19 +141,8 @@ class Client
 	public function uploadFile($filename, $path, $data)
 	{
 		$path = trim($path, '/');
-		// 		$fullPath = "https://files.api.bitcasa.com/v1/files/$path/?access_token=" . $this->accessToken;
 		$fullPath = "https://developer.api.bitcasa.com/v1/files/$path?access_token=" . $this->accessToken;
-		// 		var_dump($fullPath);
 		$options = array(CURLOPT_URL => $fullPath);
-		// 		if (is_resource($data)) {
-		// PUT
-		// 			$options[CURLOPT_PUT] = true;
-		// 			$options[CURLOPT_INFILE] = $data;
-		// 			$options[CURLOPT_INFILESIZE] = 1234;
-
-		// Can't use PUT to send stream to curl directly due to limitations with Bitcasa API
-		// Inefficient for large files! 
-		// For non-chunked uploads, we should use uploaded_file instead! (HTML4 style)
 
 		/**
 		 * We can't use PUT to send stream directly due to limitations in Bitcasa
@@ -378,7 +367,7 @@ class Client
 				case 501:
 					throw new \Sabre\DAV\Exception\Exception\NotImplemented('Not Implemented');
 				case 502:
-					return $this->get(); // Bad gateway (Bitcasa internal timeout)
+					return $this->downloadFile($filename, $path); // Bad gateway (Bitcasa internal timeout)
 				case 507:
 					throw new \Sabre\DAV\Exception\Exception\InsufficientStorage('Insufficient storage');
 				default:
@@ -415,6 +404,12 @@ class Client
 		}
 
 		curl_close($ch);
+		
+		if ($info['http_code'] == 502) {
+			// Bad gateway (Bitcasa internal timeout)
+			return $this->get($url);
+		}
+		
 		return $data;
 	}
 

@@ -26,21 +26,24 @@ class ObjectTree extends DAV\ObjectTree
 
 		$destinationParent = $this->getNodeForPath($destinationDir);
 
+		$exists = $this->getExistsValue();
+
 		if ($node instanceof \BitcasaWebdav\FS\Directory) {
 			if ($log = $node->getClient()
 					->getLogger()) {
-				$log->debug('Copy directory ' . $sourcePath . ' to ' . $destinationPath);
+				$log->debug('Copy directory ' . $sourcePath . ' to ' . $destinationPath . ' - Exists: ' . $exists);
 			}
-			$client->copyDirectory($sourceNode->getRealPath(), $destinationParent->getRealPath(), $destinationName);
+			$client->copyDirectory($sourceNode->getRealPath(), $destinationParent->getRealPath(), $destinationName,
+							$exists);
 
 			// Flush cache of destination
 			$destinationParent->setChildrenFetched(false);
 		} else {
 			if ($log = $node->getClient()
 					->getLogger()) {
-				$log->debug('Copy file ' . $sourcePath . ' to ' . $destinationPath);
+				$log->debug('Copy file ' . $sourcePath . ' to ' . $destinationPath . ' - Exists: ' . $exists);
 			}
-			$client->copyFile($sourceNode->getRealPath(), $destinationParent->getRealPath(), $destinationName);
+			$client->copyFile($sourceNode->getRealPath(), $destinationParent->getRealPath(), $destinationName, $exists);
 			// Flush cache of destination
 			$destinationParent->setChildrenFetched(false);
 		}
@@ -67,21 +70,25 @@ class ObjectTree extends DAV\ObjectTree
 		$node->setName($destinationName);
 		$node->setPath('/' . trim($destinationPath, '/'));
 
+		$exists = $this->getExistsValue();
+
 		if ($sourceDir === $destinationDir) {
 			// Rename
 			if ($node instanceof \BitcasaWebdav\FS\Directory) {
 				if ($log = $node->getClient()
 						->getLogger()) {
-					$log->debug('Renaming directory ' . $sourceName . ' to ' . $destinationName);
+					$log->debug(
+									'Renaming directory ' . $sourceName . ' to ' . $destinationName . ' - Exists: '
+											. $exists);
 				}
-				$reply = $client->renameDirectory($node->getRealPath(), $destinationName);
+				$reply = $client->renameDirectory($node->getRealPath(), $destinationName, $exists);
 				// FIXME Update children?
 			} else {
 				if ($log = $node->getClient()
 						->getLogger()) {
-					$log->debug('Renaming file ' . $sourceName . ' to ' . $destinationName);
+					$log->debug('Renaming file ' . $sourceName . ' to ' . $destinationName . ' - Exists: ' . $exists);
 				}
-				$reply = $client->renameFile($node->getRealPath(), $destinationName);
+				$reply = $client->renameFile($node->getRealPath(), $destinationName, $exists);
 			}
 		} else {
 			// Move
@@ -89,19 +96,20 @@ class ObjectTree extends DAV\ObjectTree
 			if ($node instanceof \BitcasaWebdav\FS\Directory) {
 				if ($log = $node->getClient()
 						->getLogger()) {
-					$log->debug('Moving directory ' . $sourcePath . ' to ' . $destinationPath);
+					$log->debug('Moving directory ' . $sourcePath . ' to ' . $destinationPath . ' - Exists: ' . $exists);
 				}
 				$reply = $client->moveDirectory($node->getRealPath(), $destinationParent->getRealPath(),
-								$destinationName);
+								$destinationName, $exists);
 
 				// All full paths for children will be changed. Need to purge cache. 
 				$node->setChildrenFetched(false);
 			} else {
 				if ($log = $node->getClient()
 						->getLogger()) {
-					$log->debug('Moving file ' . $sourcePath . ' to ' . $destinationPath);
+					$log->debug('Moving file ' . $sourcePath . ' to ' . $destinationPath . ' - Exists: ' . $exists);
 				}
-				$reply = $client->moveFile($node->getRealPath(), $destinationParent->getRealPath(), $destinationName);
+				$reply = $client->moveFile($node->getRealPath(), $destinationParent->getRealPath(), $destinationName,
+								$exists);
 
 				// Update cache for parent directories
 				$sourceParent = $this->getNodeForPath($sourceDir);
@@ -142,6 +150,29 @@ class ObjectTree extends DAV\ObjectTree
 		$this->markDirty($sourceDir);
 		$this->markDirty($destinationDir);
 
+	}
+
+	protected function getExistsValue()
+	{
+		$exists = 'fail'; // Default
+		if (!function_exists('getallheaders')) {
+			function getallheaders()
+			{
+				$headers = '';
+				foreach ($_SERVER as $name => $value) {
+					if (substr($name, 0, 5) == 'HTTP_') {
+						$headers[str_replace(' ', '-', ucwords(strtolower(str_replace('_', ' ', substr($name, 5)))))] = $value;
+					}
+				}
+				return $headers;
+			}
+		}
+
+		$headers = getallheaders();
+		if (isset($headers['Overwrite'])) {
+			$exists = ($headers['Overwrite'] == 'Y') ? 'overwrite' : 'fail';
+		}
+		return $exists;
 	}
 
 }
