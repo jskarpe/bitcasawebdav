@@ -293,6 +293,17 @@ class Client
 		return $this->decodeAndVerifyResponse($response);
 	}
 
+	public function copyFile($fromPath, $toPath, $filename = null, $exists = 'fail')
+	{
+		$params = array("from" => $fromPath, "to" => $toPath, "exists" => $exists);
+		if (!empty($filename)) {
+			$params['filename'] = $filename;
+		}
+		$url = "https://developer.api.bitcasa.com/v1/files?operation=copy&access_token=$this->accessToken";
+		$response = $this->post($url, $params);
+		return $this->decodeAndVerifyResponse($response);
+	}
+	
 	public function renameDirectory($realPath, $newName, $exists = 'fail')
 	{
 		$params = array("from" => $realPath, "filename" => $newName, "exists" => $exists);
@@ -312,6 +323,17 @@ class Client
 		return $this->decodeAndVerifyResponse($response);
 	}
 
+	public function copyDirectory($fromPath, $toPath, $filename = null, $exists = 'fail')
+	{
+		$params = array("from" => $fromPath, "to" => $toPath, "exists" => $exists);
+		if (!empty($filename)) {
+			$params['filename'] = $filename;
+		}
+		$url = "https://developer.api.bitcasa.com/v1/folders?operation=copy&access_token=$this->accessToken";
+		$response = $this->post($url, $params);
+		return $this->decodeAndVerifyResponse($response);
+	}
+	
 	public function downloadFile($filename, $path)
 	{
 		$url = "https://files.api.bitcasa.com/v1/files/$filename?access_token=$this->accessToken&path=$path";

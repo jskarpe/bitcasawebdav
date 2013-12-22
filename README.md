@@ -7,7 +7,9 @@ Installation:
 -------------
 
 	git clone https://github.com/Yuav/bitcasawebdav
-	cd BitcasaWebdav
+	cd bitcasawebdav
+	sudo chgrp www-data cache
+	sudo chgrp www-data config
 	curl -sS https://getcomposer.org/installer | php
 	mv composer.phar /usr/local/bin/composer
 	composer install

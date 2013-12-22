@@ -14,6 +14,8 @@
     "require": {
         "php": ">=5.3.0",
         "ext-curl": "*",
+        "ext-sqlite": "*",
+	"ext-json": "*",
         "sabre/dav" : "1.8.*",
         "doctrine/dbal": "2.5.*@dev",
         "doctrine/orm": "2.5.*@dev",

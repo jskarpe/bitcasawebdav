@@ -89,7 +89,7 @@ abstract class Node implements DAV\INode
 		if (null === $this->client) {
 			$tokenFile = realpath(__DIR__ . '/../../../config/token');
 			if (!file_exists($tokenFile)) {
-				throw new Exception(__METHOD__ , "No token file found at: $tokenFile");
+				throw new Exception(__METHOD__ . "No token file found at: $tokenFile");
 			}
 			$token = file_get_contents($tokenFile);
 			$this->client = new \BitcasaWebdav\Client($token);
@@ -120,6 +120,13 @@ abstract class Node implements DAV\INode
 	 */
 	public function setName($name)
 	{
+		/**
+		 * FIXME Argument validation
+		 * Limit the folder/file name to 64 characters.  
+		 * 	A path composed of folder and file names may be greater than 64 characters.
+		 * Names may not start with "."
+		 * Names may not contain any of the following characters: < > : " / \ | ? *
+		 */
 		$this->name = $name;
 	}
 
