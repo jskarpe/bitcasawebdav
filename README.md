@@ -53,7 +53,7 @@ Set up nginx vhost:
 
 Browse to localhost/auth.php to retrieve access token.
 
-Browse to localhost/index.php to verify your WebDAV server is working
+Browse to http://localhost/ to verify your WebDAV server is working
 
 Bitcasa WebDAV is now ready to be mounted in both Windows and Linux as a network drive
 
