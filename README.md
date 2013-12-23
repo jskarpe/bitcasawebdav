@@ -8,7 +8,7 @@ Installation:
 
 Install php + nginx:
 
-    sudo apt-get install php5 php5-curl php5-json php5-fpm php5-sqlite nginx -y
+    sudo apt-get install php5 php5-curl php5-json php5-fpm php5-sqlite curl github-cli php-cli nginx -y
     # Change listen directive in /etc/php5/fpm/php5-fpm.ini
     echo "listen = 127.0.0.1:9001" >> /etc/php5/fpm/php-fpm.conf
 
