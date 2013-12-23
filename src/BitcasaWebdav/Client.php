@@ -326,7 +326,6 @@ class Client
 
 		$fp = fopen($file, 'w+');
 		$ch = curl_init(str_replace(" ", "%20", $url));//Here is the file we are downloading, replace spaces with %20
-		curl_setopt($ch, CURLOPT_TIMEOUT, 50);
 		curl_setopt($ch, CURLOPT_FILE, $fp);
 		curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
 		$return = curl_exec($ch); // get curl response
