@@ -403,9 +403,9 @@ class Client
 				}
 				header($h);
 			}
-//var_dump($header);
+			//var_dump($header);
 			header('Expires: 0');
-			
+
 			// check for chunked encoding
 			if (preg_match('/Transfer\\-Encoding:\\s+chunked\\r\\n/', $header)) {
 				do {
@@ -414,21 +414,30 @@ class Client
 					do {
 						$chunk_size .= $byte;
 						$byte = fread($request, 1);
-					} while ($byte != "\\r"); // till we match the CR
+					} while ($byte != "\r" && !feof($request)); // till we match the CR
 					fread($request, 1); // also drop off the LF
-					//var_dump($chunk_size);
+					var_dump("orig chunk: " . $chunk_size);
 					$chunk_size = hexdec($chunk_size); // convert to real number
+					var_dump("convert chunk: " . $chunk_size);
 					if (!is_numeric($chunk_size)) {
 						throw new \Sabre\DAV\Exception("Unexpected chunk size: " . $chunk_size);
 					}
 					//var_dump($chunk_size);
-					if (!($chunk_size > 0)) {
+					if (!$chunk_size) {
 						break; // End chunk
 					}
-					echo fread($request, $chunk_size);
+					$response = '';
+					do {
+						$remaining = $chunk_size - strlen($response);
+						$response = fread($request, $remaining);
+					} while ($remaining > 0);
+					echo $response;
+					echo var_dump("strlen read: " . strlen($response));
+
+					//var_dump($response);
 					flush();
 					fread($request, 2); // ditch the CRLF that trails the chunk
-				} while ($chunk_size > 0);
+				} while ($chunk_size);
 				// till we reach the 0 length chunk (end marker)
 			} else {
 				while (!feof($request)) {
@@ -544,6 +553,93 @@ class Client
 		}
 	}
 
+	public function downloadFileChunked($filename, $path, $filesize, $mimeType = 'application/download')
+	{
+		$url = "https://files.api.bitcasa.com/v1/files/$filename?access_token=$this->accessToken&path=$path";
+
+		if ($log = $this->getLogger()) {
+			$log->debug("Downloading file $filename from Bitcasa");
+		}
+
+		$fp = fopen('php://output', 'w');
+
+		$ch = curl_init(str_replace(" ", "%20", $url));//Here is the file we are downloading, replace spaces with %20
+		$mh = curl_multi_init();
+		//curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+		curl_setopt($ch, CURLOPT_FILE, $fp);
+		//curl_setopt($ch, CURLOPT_HEADER, 0);
+		//curl_setopt($ch, CURLOPT_BINARYTRANSFER, 1);
+		curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+		$mh = curl_multi_init();
+		$active = null;
+		curl_multi_add_handle($mh, $ch);
+		do {
+			$mrc = curl_multi_exec($mh, $active);
+		} while ($mrc == CURLM_CALL_MULTI_PERFORM);
+
+		header("Content-Type: $mimeType");
+		header('Content-Disposition: attachment; filename=' . $filename);
+		header('Content-Transfer-Encoding: binary');
+		header('Expires: 0');
+		header('Cache-Control: must-revalidate');
+		header('Pragma: public');
+		header('Content-Length: ' . $filesize);
+		while ($active && $mrc == CURLM_OK) {
+			//if (curl_multi_select($mh) != -1) {
+			do {
+				$mrc = curl_multi_exec($mh, $active);
+			} while ($mrc == CURLM_CALL_MULTI_PERFORM);
+			//}
+
+			// echo the contents downloaded so far
+			// Note that this must be called with the curl handle, not with the multi handle.
+
+				//echo fread($fr, $filesize);
+				//flush();
+
+		
+			
+			//echo curl_multi_getcontent($ch);
+			ob_flush();
+			flush();
+			usleep(100);
+		}
+		//header('Content-Description: File Transfer');
+		//header("Content-Disposition: attachment; filename=" . $filename);
+		//echo curl_multi_getcontent($ch);
+		curl_multi_remove_handle($mh, $ch);
+		curl_multi_close($mh);
+		fclose($fp);
+		//fclose($fr);
+		//unlink($file);
+		exit; // Halt further processing
+	}
+
+	function download($url, $name, $hash)
+	{
+		$ch = curl_init($url);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+		$mh = curl_multi_init();
+		$active = null;
+		curl_multi_add_handle($mh, $ch);
+		do {
+			$mrc = curl_multi_exec($mh, $active);
+		} while ($mrc == CURLM_CALL_MULTI_PERFORM);
+		while ($active && $mrc == CURLM_OK) {
+			if (curl_multi_select($mh) != -1) {
+				do {
+					$mrc = curl_multi_exec($mh, $active);
+				} while ($mrc == CURLM_CALL_MULTI_PERFORM);
+			}
+			header('Content-Description: File Transfer');
+			header("Content-Disposition: attachment; filename=" . $name);
+			readfile(curl_multi_getcontent($ch));
+			ob_clean();
+			flush();
+		}
+		curl_multi_remove_handle($mh, $ch);
+		curl_multi_close($mh);
+	}
 	public function downloadFile($filename, $path)
 	{
 		$url = "https://files.api.bitcasa.com/v1/files/$filename?access_token=$this->accessToken&path=$path";
