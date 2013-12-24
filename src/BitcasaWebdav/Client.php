@@ -208,9 +208,10 @@ class Client
 		switch ($code) {
 			case 502:
 				if ($log = $this->getLogger()) {
-					$log->warn('Bitcasa return 502 Bad Gateway. Retrying upload to ' . $fullPath, array(
-									'upload'
-							));
+					$log->warn('Bitcasa return 502 Bad Gateway. Retrying upload to ' . $fullPath,
+									array(
+											'upload'
+									));
 				}
 				return $this->uploadFile($filename, $path, $data); // Bad gateway (Bitcasa internal timeout)
 		}
@@ -367,13 +368,117 @@ class Client
 			$log->debug("Downloading file $filename using socket from Bitcasa");
 		}
 
-		$fp = fsockopen("ssl://$host", 443, $errno, $errstr, 30);
-		if (!$fp) {
+		$request = @fsockopen("ssl://$host", 443, $errno, $errstr, 30);
+		if (!$request) {
 			throw new \Sabre\DAV\Exception("$errstr ($errno)<br />\n");
 		} else {
+
+			$out = "GET $uri HTTP/1.1\r\n";
+			$out .= "Host: $host\r\n";
+			$headers = $this->getAllHeaders();
+			foreach ($headers as $header => $value) {
+				if (false !== strpos($header, 'Connection')) {
+					continue;
+				}
+				if (false !== strpos($header, 'GET')) {
+					continue;
+				}
+				if (false !== strpos($header, 'Host')) {
+					continue;
+				}
+				$out .= "$header: $value\r\n";
+			}
+			$out .= "Connection: Close\r\n\r\n";
+
+			fwrite($request, $out);
+
+			$header = '';
+			do {
+				$header .= fread($request, 1);
+			} while (!preg_match('/\\r\\n\\r\\n$/', $header));
+			$headers = explode("\r\n", $header);
+			foreach ($headers as $h) {
+				if (preg_match('/Transfer\\-Encoding:\\s+chunked\\r\\n/', $h)) {
+					continue;
+				}
+				header($h);
+			}
+//var_dump($header);
+			header('Expires: 0');
+			
+			// check for chunked encoding
+			if (preg_match('/Transfer\\-Encoding:\\s+chunked\\r\\n/', $header)) {
+				do {
+					$byte = "";
+					$chunk_size = "";
+					do {
+						$chunk_size .= $byte;
+						$byte = fread($request, 1);
+					} while ($byte != "\\r"); // till we match the CR
+					fread($request, 1); // also drop off the LF
+					//var_dump($chunk_size);
+					$chunk_size = hexdec($chunk_size); // convert to real number
+					if (!is_numeric($chunk_size)) {
+						throw new \Sabre\DAV\Exception("Unexpected chunk size: " . $chunk_size);
+					}
+					//var_dump($chunk_size);
+					if (!($chunk_size > 0)) {
+						break; // End chunk
+					}
+					echo fread($request, $chunk_size);
+					flush();
+					fread($request, 2); // ditch the CRLF that trails the chunk
+				} while ($chunk_size > 0);
+				// till we reach the 0 length chunk (end marker)
+			} else {
+				while (!feof($request)) {
+					echo fread($request, 64 * 1024);
+					flush();
+				}
+			}
+
+			fclose($request);
+			exit; // Stop further processing
+
+			if (isset($headers['Range'])) {
+				$range = $headers['Range'];
+				list($param, $range) = explode('=', $range);
+				if (strtolower(trim($param)) != 'bytes') { // Bad request - range unit is not 'bytes'
+					header("HTTP/1.1 400 Invalid Request");
+					exit;
+				}
+				$range = explode(',', $range);
+				$range = explode('-', $range[0]); // We only deal with the first requested range
+				if (count($range) != 2) { // Bad request - 'bytes' parameter is not valid
+					header("HTTP/1.1 400 Invalid Request");
+					exit;
+				}
+				if ($range[0] === '') { // First number missing, return last $range[1] bytes
+					$end = $filesize - 1;
+					$start = $end - intval($range[0]);
+				} else if ($range[1] === '') { // Second number missing, return from byte $range[0] to end
+					$start = intval($range[0]);
+					$end = $filesize - 1;
+				} else { // Both numbers present, return specific range
+					$start = intval($range[0]);
+					$end = intval($range[1]);
+					if ($end >= $filesize || (!$start && (!$end || $end == ($filesize - 1))))
+						$partial = false;
+					// Invalid range/whole file specified, return whole file
+				}
+				$length = $end - $start + 1;
+
+				header('HTTP/1.1 206 Partial Content');
+				header("Content-Range: bytes $start-$end/$filesize");
+				$out .= "Range: $range\r\n";
+				if ($log = $this->getLogger()) {
+					$log->debug('Content-Range: bytes ' . $offset . '-' . ($offset + $length) . '/' . $filesize);
+				}
+			}
+
 			header('Content-Description: File Transfer');
 			header("Content-Type: $mimeType");
-			header('Content-Disposition: attachment; filename='.basename($file));
+			header('Content-Disposition: attachment; filename=' . $filename);
 			header('Content-Transfer-Encoding: binary');
 			header('Expires: 0');
 			header('Cache-Control: must-revalidate');
@@ -381,21 +486,62 @@ class Client
 			header('Content-Length: ' . $filesize);
 			ob_clean();
 			flush();
-	//		readfile($file);
-			
-			
-			
-			
-			$out = "GET $uri HTTP/1.1\r\n";
-			$out .= "Host: $host\r\n";
+			//		readfile($file);
+
 			$out .= "Connection: Close\r\n\r\n";
 			fwrite($fp, $out);
-			while (!feof($fp)) {
-				echo fgets($fp, 64 * 1024);
-			}
+			$this->decodeAndSendChunkedData($fp);
 			fclose($fp);
 		}
 		exit; // Stop any further processing
+	}
+
+	protected function decodeAndSendChunkedData($request)
+	{
+		// get header
+		$header = '';
+		do {
+			$header .= fread($request, 1);
+		} while (!preg_match('/\\r\\n\\r\\n$/', $header));
+
+		// check for chunked encoding
+		if (preg_match('/Transfer\\-Encoding:\\s+chunked\\r\\n/', $header)) {
+			do {
+				$byte = "";
+				$chunk_size = "";
+				do {
+					$chunk_size .= $byte;
+					$byte = fread($request, 1);
+				} while ($byte != "\r" && $byte != "\\r"); // till we match the CR
+				fread($request, 1); // also drop off the LF
+				$chunk_size = hexdec($chunk_size); // convert to real number
+				if (!is_numeric($chunk_size)) {
+					throw new \Sabre\DAV\Exception("Unexpected chunk size: " . $chunk_size);
+				}
+				if ($chunk_size == 0) {
+					break; // End chunk
+				}
+				echo fread($request, $chunk_size);
+				flush();
+				fread($request, 2); // ditch the CRLF that trails the chunk
+			} while ($chunk_size > 0);
+			// till we reach the 0 length chunk (end marker)
+		} else {
+			while (!feof($request)) {
+				echo fread($request, 64 * 1024);
+				flush();
+			}
+
+			// check for specified content length
+			//			if (preg_match('/Content\\-Length:\\s+([0-9]*)\\r\\n/', $header, $matches)) {
+			//				$response = fread($request, $matches[1]);
+			//			} else {
+			// not a nice way to do it (may also result in extra CRLF which trails the real content???)
+			//			while (!feof($request)) {
+			//				echo fread($request, 64*1024);
+			//			}
+			//		}
+		}
 	}
 
 	public function downloadFile($filename, $path)
@@ -456,7 +602,6 @@ class Client
 		if (false === $return) {
 			throw new \Sabre\DAV\Exception($error);
 		}
-		exit;
 		return $file;
 	}
 
@@ -596,5 +741,23 @@ class Client
 			}
 		}
 		return $this->logger;
+	}
+
+	public function getAllHeaders()
+	{
+		if (!function_exists('getallheaders')) {
+			function getallheaders()
+			{
+				$headers = '';
+				foreach ($_SERVER as $name => $value) {
+					if (substr($name, 0, 5) == 'HTTP_') {
+						$headers[str_replace(' ', '-', ucwords(strtolower(str_replace('_', ' ', substr($name, 5)))))] = $value;
+					}
+				}
+				return $headers;
+			}
+		}
+
+		return getallheaders();
 	}
 }

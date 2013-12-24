@@ -162,8 +162,10 @@ class File extends Node implements DAV\IFile
 	{
 		$client = $this->getClient();
 		$fileName = urlencode($this->getName());
-		$file = $client->downloadFileSocket($fileName, $this->getRealPath(), $this->getSize());
-
+		
+		//$file = $client->downloadFileSocket($fileName, $this->getRealPath(), $this->getSize());
+		$file = $client->downloadFile($fileName, $this->getRealPath());
+		
 		// SabreDAV expects resource handle returned
 		return fopen($file, 'r');
 	}
