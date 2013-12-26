@@ -5,6 +5,7 @@ class Client
 {
 
 	const PATH_DOES_NOT_EXIST = 2039;
+	const BITCASA_INTERNAL_TIMEOUT = 500;
 
 	private $apiUrl;
 	private $accessToken;
@@ -358,224 +359,145 @@ class Client
 		return $this->decodeAndVerifyResponse($response);
 	}
 
-	public function downloadFileSocket($filename, $path, $filesize, $mimeType = 'application/octet-stream')
+	public function downloadFileAdvanced($filename, $path, $filesize)
 	{
-		$uri = "/v1/files/$filename?access_token=$this->accessToken&path=$path";
-		$host = "files.api.bitcasa.com";
-		$scheme = "https://";
+		$url = "https://files.api.bitcasa.com/v1/files/$filename?access_token=$this->accessToken&path=$path";
 
 		if ($log = $this->getLogger()) {
-			$log->debug("Downloading file $filename using socket from Bitcasa");
+			$log->debug("Downloading file $filename from Bitcasa using curl_multi");
 		}
 
-		$request = @fsockopen("ssl://$host", 443, $errno, $errstr, 30);
-		if (!$request) {
-			throw new \Sabre\DAV\Exception("$errstr ($errno)<br />\n");
-		} else {
+		$bodyStream = fopen('php://output', 'w');
+		$headerStream = fopen('php://temp', 'rw');
 
-			$out = "GET $uri HTTP/1.1\r\n";
-			$out .= "Host: $host\r\n";
-			$headers = $this->getAllHeaders();
-			foreach ($headers as $header => $value) {
-				if (false !== strpos($header, 'Connection')) {
-					continue;
-				}
-				if (false !== strpos($header, 'GET')) {
-					continue;
-				}
-				if (false !== strpos($header, 'Host')) {
-					continue;
-				}
-				$out .= "$header: $value\r\n";
-			}
-			$out .= "Connection: Close\r\n\r\n";
+		$ch = curl_init(str_replace(" ", "%20", $url)); //Here is the file we are downloading, replace spaces with %20
+		curl_setopt($ch, CURLOPT_WRITEHEADER, $headerStream);
+		curl_setopt($ch, CURLOPT_FILE, $bodyStream);
+		curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
 
-			fwrite($request, $out);
-
-			$header = '';
-			do {
-				$header .= fread($request, 1);
-			} while (!preg_match('/\\r\\n\\r\\n$/', $header));
-			$headers = explode("\r\n", $header);
-			foreach ($headers as $h) {
-				if (preg_match('/Transfer\\-Encoding:\\s+chunked\\r\\n/', $h)) {
-					continue;
-				}
-				header($h);
-			}
-			//var_dump($header);
-			header('Expires: 0');
-
-			// check for chunked encoding
-			if (preg_match('/Transfer\\-Encoding:\\s+chunked\\r\\n/', $header)) {
-				do {
-					$byte = "";
-					$chunk_size = "";
-					do {
-						$chunk_size .= $byte;
-						$byte = fread($request, 1);
-					} while ($byte != "\r" && !feof($request)); // till we match the CR
-					fread($request, 1); // also drop off the LF
-					var_dump("orig chunk: " . $chunk_size);
-					$chunk_size = hexdec($chunk_size); // convert to real number
-					var_dump("convert chunk: " . $chunk_size);
-					if (!is_numeric($chunk_size)) {
-						throw new \Sabre\DAV\Exception("Unexpected chunk size: " . $chunk_size);
-					}
-					//var_dump($chunk_size);
-					if (!$chunk_size) {
-						break; // End chunk
-					}
-					$response = '';
-					do {
-						$remaining = $chunk_size - strlen($response);
-						$response = fread($request, $remaining);
-					} while ($remaining > 0);
-					echo $response;
-					echo var_dump("strlen read: " . strlen($response));
-
-					//var_dump($response);
-					flush();
-					fread($request, 2); // ditch the CRLF that trails the chunk
-				} while ($chunk_size);
-				// till we reach the 0 length chunk (end marker)
-			} else {
-				while (!feof($request)) {
-					echo fread($request, 64 * 1024);
-					flush();
-				}
-			}
-
-			fclose($request);
-			exit; // Stop further processing
-
-			if (isset($headers['Range'])) {
-				$range = $headers['Range'];
-				list($param, $range) = explode('=', $range);
-				if (strtolower(trim($param)) != 'bytes') { // Bad request - range unit is not 'bytes'
-					header("HTTP/1.1 400 Invalid Request");
-					exit;
-				}
-				$range = explode(',', $range);
-				$range = explode('-', $range[0]); // We only deal with the first requested range
-				if (count($range) != 2) { // Bad request - 'bytes' parameter is not valid
-					header("HTTP/1.1 400 Invalid Request");
-					exit;
-				}
-				if ($range[0] === '') { // First number missing, return last $range[1] bytes
-					$end = $filesize - 1;
-					$start = $end - intval($range[0]);
-				} else if ($range[1] === '') { // Second number missing, return from byte $range[0] to end
-					$start = intval($range[0]);
-					$end = $filesize - 1;
-				} else { // Both numbers present, return specific range
-					$start = intval($range[0]);
-					$end = intval($range[1]);
-					if ($end >= $filesize || (!$start && (!$end || $end == ($filesize - 1))))
-						$partial = false;
-					// Invalid range/whole file specified, return whole file
-				}
-				$length = $end - $start + 1;
-
-				header('HTTP/1.1 206 Partial Content');
-				header("Content-Range: bytes $start-$end/$filesize");
-				$out .= "Range: $range\r\n";
-				if ($log = $this->getLogger()) {
-					$log->debug('Content-Range: bytes ' . $offset . '-' . ($offset + $length) . '/' . $filesize);
-				}
-			}
-
-			header('Content-Description: File Transfer');
-			header("Content-Type: $mimeType");
-			header('Content-Disposition: attachment; filename=' . $filename);
-			header('Content-Transfer-Encoding: binary');
-			header('Expires: 0');
-			header('Cache-Control: must-revalidate');
-			header('Pragma: public');
-			header('Content-Length: ' . $filesize);
-			ob_clean();
-			flush();
-			//		readfile($file);
-
-			$out .= "Connection: Close\r\n\r\n";
-			fwrite($fp, $out);
-			$this->decodeAndSendChunkedData($fp);
-			fclose($fp);
-		}
-		exit; // Stop any further processing
-	}
-
-	protected function decodeAndSendChunkedData($request)
-	{
-		// get header
-		$header = '';
+		$mh = curl_multi_init();
+		curl_multi_add_handle($mh, $ch);
+		$headerProcessed = false;
+		ob_start(); // Buffer body output until headers are ready
 		do {
-			$header .= fread($request, 1);
-		} while (!preg_match('/\\r\\n\\r\\n$/', $header));
+			$mrc = curl_multi_exec($mh, $active);
+		} while ($mrc == CURLM_CALL_MULTI_PERFORM);
 
-		// check for chunked encoding
-		if (preg_match('/Transfer\\-Encoding:\\s+chunked\\r\\n/', $header)) {
+		while ($active && $mrc == CURLM_OK) {
 			do {
-				$byte = "";
-				$chunk_size = "";
-				do {
-					$chunk_size .= $byte;
-					$byte = fread($request, 1);
-				} while ($byte != "\r" && $byte != "\\r"); // till we match the CR
-				fread($request, 1); // also drop off the LF
-				$chunk_size = hexdec($chunk_size); // convert to real number
-				if (!is_numeric($chunk_size)) {
-					throw new \Sabre\DAV\Exception("Unexpected chunk size: " . $chunk_size);
-				}
-				if ($chunk_size == 0) {
-					break; // End chunk
-				}
-				echo fread($request, $chunk_size);
-				flush();
-				fread($request, 2); // ditch the CRLF that trails the chunk
-			} while ($chunk_size > 0);
-			// till we reach the 0 length chunk (end marker)
-		} else {
-			while (!feof($request)) {
-				echo fread($request, 64 * 1024);
-				flush();
+				$mrc = curl_multi_exec($mh, $active);
+			} while ($mrc == CURLM_CALL_MULTI_PERFORM);
+
+			if (curl_errno($ch)) {
+				throw new \Sabre\DAV\Exception(curl_error($ch) . "-" . curl_errno($ch));
 			}
 
-			// check for specified content length
-			//			if (preg_match('/Content\\-Length:\\s+([0-9]*)\\r\\n/', $header, $matches)) {
-			//				$response = fread($request, $matches[1]);
-			//			} else {
-			// not a nice way to do it (may also result in extra CRLF which trails the real content???)
-			//			while (!feof($request)) {
-			//				echo fread($request, 64*1024);
-			//			}
-			//		}
+			// Process headers
+			if (!$headerProcessed) {
+				$currentPos = ftell($headerStream);
+				rewind($headerStream);
+				$header = stream_get_contents($headerStream);
+				fseek($headerStream, $currentPos); // Is this really needed?
+				if (strpos($header, "\r\n\r\n") !== false) {
+					// End of headers reached
+					if (self::BITCASA_INTERNAL_TIMEOUT == $this->verifyHeader($header)) {
+						return $this->downloadFileAdvanced($filename, $path);
+					}
+
+					$this->generateProxyHeader($header, $filesize);
+
+					// Headers received, send output to browser
+					$headerProcessed = true;
+					ob_end_flush();
+				}
+			}
+		}
+
+		curl_multi_remove_handle($mh, $ch);
+		curl_close($ch);
+		curl_multi_close($mh);
+		fclose($bodyStream);
+		exit; // Download complete, stop processing
+	}
+
+	protected function verifyHeader($header)
+	{
+		/**
+		 * HTTP/1.1 is RFC2616. In Section 6.1, it describes the Status-Line, 
+		 * the first component of a Response, as:
+		 * Status-Line = HTTP-Version SP Status-Code SP Reason-Phrase CRLF
+		 */
+		$data = explode(' ', "HTTP/1.1 200 OK");
+		$code = $data[1];
+		if ($code >= 400) {
+			switch ($code) {
+				case 400:
+					throw new \Sabre\DAV\Exception\Exception\BadRequest('Bad request');
+				case 401:
+					throw new \Sabre\DAV\Exception\Exception\NotAuthenticated('Not authenticated');
+				case 402:
+					throw new \Sabre\DAV\Exception\Exception\PaymentRequired('Payment required');
+				case 403:
+					throw new \Sabre\DAV\Exception\Exception\Forbidden('Forbidden');
+				case 404:
+					throw new \Sabre\DAV\Exception\Exception\NotFound('Resource not found.');
+				case 405:
+					throw new \Sabre\DAV\Exception\Exception\MethodNotAllowed('Method not allowed');
+				case 409:
+					throw new \Sabre\DAV\Exception\Exception\Conflict('Conflict');
+				case 412:
+					throw new \Sabre\DAV\Exception\Exception\PreconditionFailed('Precondition failed');
+				case 416:
+					throw new \Sabre\DAV\Exception\Exception\RequestedRangeNotSatisfiable(
+							'Requested Range Not Satisfiable');
+				case 500:
+					throw new \Sabre\DAV\Exception\Exception('Internal server error');
+				case 501:
+					throw new \Sabre\DAV\Exception\Exception\NotImplemented('Not Implemented');
+				case 502:
+					return self::BITCASA_INTERNAL_TIMEOUT;
+				//return $this->downloadFile($filename, $path); // Bad gateway (Bitcasa internal timeout)
+				case 507:
+					throw new \Sabre\DAV\Exception\Exception\InsufficientStorage('Insufficient storage');
+				default:
+					throw new \Sabre\DAV\Exception\Exception('HTTP error response. (errorcode ' . $code . ')');
+			}
 		}
 	}
 
-	public function downloadFileChunked($filename, $path, $filesize, $mimeType = 'application/download')
+	protected function generateProxyHeader($headerString, $filesize)
+	{
+		$headers = explode("\r\n", $headerString);
+		header($headers[0]); // HTTP status
+		header('Expires: 0');
+		header('Cache-Control: must-revalidate');
+		header("Content-Length: $filesize");
+		foreach ($headers as $header) {
+			if (preg_match('/^Content-Type/', $header)) {
+				header($header);
+			}
+			if (preg_match('/^Accept-Ranges/', $header)) {
+				header($header);
+			}
+			if (preg_match('/^Content-Disposition/', $header)) {
+				header($header);
+			}
+			if (preg_match('/^Content-Length/', $header)) {
+				header($header, true);
+			}
+		}
+
+		//X-Forwarded-For:
+
+	}
+
+	public function downloadFileProxied($filename, $path, $filesize, $mimeType = 'application/download')
 	{
 		$url = "https://files.api.bitcasa.com/v1/files/$filename?access_token=$this->accessToken&path=$path";
 
 		if ($log = $this->getLogger()) {
 			$log->debug("Downloading file $filename from Bitcasa");
 		}
-
-		$fp = fopen('php://output', 'w');
-
-		$ch = curl_init(str_replace(" ", "%20", $url));//Here is the file we are downloading, replace spaces with %20
-		$mh = curl_multi_init();
-		//curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-		curl_setopt($ch, CURLOPT_FILE, $fp);
-		//curl_setopt($ch, CURLOPT_HEADER, 0);
-		//curl_setopt($ch, CURLOPT_BINARYTRANSFER, 1);
-		curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-		$mh = curl_multi_init();
-		$active = null;
-		curl_multi_add_handle($mh, $ch);
-		do {
-			$mrc = curl_multi_exec($mh, $active);
-		} while ($mrc == CURLM_CALL_MULTI_PERFORM);
 
 		header("Content-Type: $mimeType");
 		header('Content-Disposition: attachment; filename=' . $filename);
@@ -584,62 +506,57 @@ class Client
 		header('Cache-Control: must-revalidate');
 		header('Pragma: public');
 		header('Content-Length: ' . $filesize);
-		while ($active && $mrc == CURLM_OK) {
-			//if (curl_multi_select($mh) != -1) {
-			do {
-				$mrc = curl_multi_exec($mh, $active);
-			} while ($mrc == CURLM_CALL_MULTI_PERFORM);
-			//}
+		$fp = fopen('php://output', 'w');
+		$ch = curl_init(str_replace(" ", "%20", $url)); //Here is the file we are downloading, replace spaces with %20
 
-			// echo the contents downloaded so far
-			// Note that this must be called with the curl handle, not with the multi handle.
-
-				//echo fread($fr, $filesize);
-				//flush();
-
-		
-			
-			//echo curl_multi_getcontent($ch);
-			ob_flush();
-			flush();
-			usleep(100);
-		}
-		//header('Content-Description: File Transfer');
-		//header("Content-Disposition: attachment; filename=" . $filename);
-		//echo curl_multi_getcontent($ch);
-		curl_multi_remove_handle($mh, $ch);
-		curl_multi_close($mh);
+		//curl_setopt($ch, CURLOPT_WRITEHEADER, fopen('php://output', 'w'));
+		curl_setopt($ch, CURLOPT_FILE, $fp);
+		curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+		$return = curl_exec($ch); // get curl response
+		$code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		$error = curl_error($ch);
+		curl_close($ch);
 		fclose($fp);
-		//fclose($fr);
-		//unlink($file);
-		exit; // Halt further processing
+		if ($code >= 400) {
+			switch ($code) {
+				case 400:
+					throw new \Sabre\DAV\Exception\Exception\BadRequest('Bad request');
+				case 401:
+					throw new \Sabre\DAV\Exception\Exception\NotAuthenticated('Not authenticated');
+				case 402:
+					throw new \Sabre\DAV\Exception\Exception\PaymentRequired('Payment required');
+				case 403:
+					throw new \Sabre\DAV\Exception\Exception\Forbidden('Forbidden');
+				case 404:
+					throw new \Sabre\DAV\Exception\Exception\NotFound('Resource not found.');
+				case 405:
+					throw new \Sabre\DAV\Exception\Exception\MethodNotAllowed('Method not allowed');
+				case 409:
+					throw new \Sabre\DAV\Exception\Exception\Conflict('Conflict');
+				case 412:
+					throw new \Sabre\DAV\Exception\Exception\PreconditionFailed('Precondition failed');
+				case 416:
+					throw new \Sabre\DAV\Exception\Exception\RequestedRangeNotSatisfiable(
+							'Requested Range Not Satisfiable');
+				case 500:
+					throw new \Sabre\DAV\Exception\Exception('Internal server error');
+				case 501:
+					throw new \Sabre\DAV\Exception\Exception\NotImplemented('Not Implemented');
+				case 502:
+					return $this->downloadFileProxied($filename, $path, $filesize); // Bad gateway (Bitcasa internal timeout)
+				case 507:
+					throw new \Sabre\DAV\Exception\Exception\InsufficientStorage('Insufficient storage');
+				default:
+					throw new \Sabre\DAV\Exception\Exception('HTTP error response. (errorcode ' . $code . ')');
+			}
+		}
+
+		if (false === $return) {
+			throw new \Sabre\DAV\Exception($error);
+		}
+		exit; // No more processing
 	}
 
-	function download($url, $name, $hash)
-	{
-		$ch = curl_init($url);
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-		$mh = curl_multi_init();
-		$active = null;
-		curl_multi_add_handle($mh, $ch);
-		do {
-			$mrc = curl_multi_exec($mh, $active);
-		} while ($mrc == CURLM_CALL_MULTI_PERFORM);
-		while ($active && $mrc == CURLM_OK) {
-			if (curl_multi_select($mh) != -1) {
-				do {
-					$mrc = curl_multi_exec($mh, $active);
-				} while ($mrc == CURLM_CALL_MULTI_PERFORM);
-			}
-			header('Content-Description: File Transfer');
-			header("Content-Disposition: attachment; filename=" . $name);
-			readfile(curl_multi_getcontent($ch));
-			ob_clean();
-			flush();
-		}
-		curl_multi_remove_handle($mh, $ch);
-		curl_multi_close($mh);
-	}
 	public function downloadFile($filename, $path)
 	{
 		$url = "https://files.api.bitcasa.com/v1/files/$filename?access_token=$this->accessToken&path=$path";
