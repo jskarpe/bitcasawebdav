@@ -1,6 +1,7 @@
 <?php
 namespace BitcasaWebdav\FS;
 use \Sabre\DAV;
+use BitcasaWebdav\Exception;
 
 /**
  * File class
@@ -165,7 +166,6 @@ class File extends Node implements DAV\IFile
 		//$file = $client->downloadFile($filename, $this->getRealPath());
 		//$file = $client->downloadFileProxied($fileName, $this->getRealPath(), $this->getSize(), $this->getMime());
 		$file = $client->downloadFileAdvanced($fileName, $this->getRealPath(), $this->getSize(), $this->getMime());
-		
 		// SabreDAV expects resource handle returned
 		return fopen($file, 'r');
 	}

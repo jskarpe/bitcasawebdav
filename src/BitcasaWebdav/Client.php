@@ -359,7 +359,7 @@ class Client
 		return $this->decodeAndVerifyResponse($response);
 	}
 
-	public function downloadFileAdvanced($filename, $path, $filesize)
+	public function downloadFileAdvanced($filename, $path, $filesize, $mimeType = 'application/download')
 	{
 		$url = "https://files.api.bitcasa.com/v1/files/$filename?access_token=$this->accessToken&path=$path";
 
@@ -374,6 +374,10 @@ class Client
 		curl_setopt($ch, CURLOPT_WRITEHEADER, $headerStream);
 		curl_setopt($ch, CURLOPT_FILE, $bodyStream);
 		curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+		if (isset($_SERVER['HTTP_RANGE'])) {
+			preg_match('/bytes=(.*)/', $_SERVER['HTTP_RANGE'], $match);
+			curl_setopt($ch, CURLOPT_RANGE, $match[1]);
+		}
 
 		$mh = curl_multi_init();
 		curl_multi_add_handle($mh, $ch);
@@ -404,7 +408,7 @@ class Client
 						return $this->downloadFileAdvanced($filename, $path);
 					}
 
-					$this->generateProxyHeader($header, $filesize);
+					$this->generateProxyHeader($header, $filesize, $mimeType);
 
 					// Headers received, send output to browser
 					$headerProcessed = true;
@@ -465,16 +469,19 @@ class Client
 		}
 	}
 
-	protected function generateProxyHeader($headerString, $filesize)
+	protected function generateProxyHeader($headerString, $filesize, $mimeType)
 	{
 		$headers = explode("\r\n", $headerString);
 		header($headers[0]); // HTTP status
-		header('Expires: 0');
+		header('Expires: Tue, 06 Dec 2000 20:24:15 GMT');
 		header('Cache-Control: must-revalidate');
-		header("Content-Length: $filesize");
+		header("Content-Type: $mimeType");
+		if (!isset($_SERVER['HTTP_RANGE'])) {
+			header("Content-Length: $filesize");
+		}
 		foreach ($headers as $header) {
 			if (preg_match('/^Content-Type/', $header)) {
-				header($header);
+				header($header, true);
 			}
 			if (preg_match('/^Accept-Ranges/', $header)) {
 				header($header);

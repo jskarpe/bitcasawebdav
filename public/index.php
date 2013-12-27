@@ -1,6 +1,5 @@
 <?php
 include_once __DIR__ . '/../bootstrap.php';
-
 if (!file_exists(__DIR__ . '/../cache/db.sqlite3')) {
 	$tool = new \Doctrine\ORM\Tools\SchemaTool($entityManager);
 	$entityManager->getConnection()->connect();
