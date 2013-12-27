@@ -420,7 +420,7 @@ class Client
 		curl_multi_remove_handle($mh, $ch);
 		curl_close($ch);
 		curl_multi_close($mh);
-		fclose($bodyStream);
+		fclose($bodyStream); // Not closing explicitly results in incomplete download for curl_multi
 		exit; // Download complete, stop processing
 	}
 
@@ -476,9 +476,7 @@ class Client
 		header('Expires: Tue, 06 Dec 2000 20:24:15 GMT');
 		header('Cache-Control: must-revalidate');
 		header("Content-Type: $mimeType");
-		if (!isset($_SERVER['HTTP_RANGE'])) {
-			header("Content-Length: $filesize");
-		}
+		header("Content-Length: " . $this->calculateContentLength($filesize));
 		foreach ($headers as $header) {
 			if (preg_match('/^Content-Type/', $header)) {
 				header($header, true);
@@ -496,6 +494,61 @@ class Client
 
 		//X-Forwarded-For:
 
+	}
+
+	protected function calculateContentLength($filesize)
+	{
+		// 0 indexed. 0-2 == 3 bytes
+		if (isset($_SERVER['HTTP_RANGE'])) {
+			// 0 indexed. 0-2 == 3 bytes
+			$httprange = $_SERVER['HTTP_RANGE'];
+			$range = substr($httprange, strpos($httprange, '=')+1);
+			/**
+			Sets the first and last bytes of a range, given a range expressed as a string 
+			and the size of the file.
+			
+			If the end of the range is not specified, or the end of the range is greater 
+			than the length of the file, $last is set as the end of the file.
+			
+			If the begining of the range is not specified, the meaning of the value after 
+			the dash is "get the last n bytes of the file".
+			
+			If $first is greater than $last, the range is not satisfiable, and we should 
+			return a response with a status of 416 (Requested range not satisfiable).
+			
+			Examples:
+			$range='0-499', $filesize=1000 => $first=0, $last=499 .
+			$range='500-', $filesize=1000 => $first=500, $last=999 .
+			$range='500-1200', $filesize=1000 => $first=500, $last=999 .
+			$range='-200', $filesize=1000 => $first=800, $last=999 .
+			
+			 */
+			$dash = strpos($range, '-');
+			$first = trim(substr($range, 0, $dash));
+			$last = trim(substr($range, $dash + 1));
+			if ($first == '') {
+				//suffix byte range: gets last n bytes
+				$suffix = $last;
+				$last = $filesize - 1;
+				$first = $filesize - $suffix;
+				if ($first < 0)
+					$first = 0;
+			} else {
+				if ($last == '' || $last > $filesize - 1)
+					$last = $filesize - 1;
+			}
+			if ($first > $last) {
+				//unsatisfiable range
+				header("HTTP/1.1 416 Requested range ".$range." not satisfiable");
+				header("Content-Range: */$filesize");
+				exit;
+			}
+			header("Content-Range: bytes $first-$last/$filesize");
+			return $last - $first + 1;
+		} else {
+			return $filesize;
+
+		}
 	}
 
 	public function downloadFileProxied($filename, $path, $filesize, $mimeType = 'application/download')
